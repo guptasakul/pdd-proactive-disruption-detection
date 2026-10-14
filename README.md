@@ -11,6 +11,8 @@ Author: Sakul Gupta · Status: Specifications v1.0 — Draft for architecture re
 ```
 docs/
   whitepaper/                 White paper (PDF)
+  executive-summary/          Two-page C-suite brief (PDF)
+  infographic/                One-page solution summary infographic (JPG)
   specifications/
     docx/                     Word specifications TS-00 … TS-17 (generated)
     source/                   Markdown sources — the editable masters
