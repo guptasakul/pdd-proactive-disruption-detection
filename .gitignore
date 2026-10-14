@@ -1,0 +1,6 @@
+node_modules/
+*.pdf.tmp
+~$*.docx
+.DS_Store
+Thumbs.db
+tools/spec-builder/out/
