@@ -1,4 +1,4 @@
-# Proactive Infrastructure Disruption Detection & Automated Incident Response (PDD)
+# Proactive Infrastructure Disruption Detection & Automated Incident Response (PIDD)
 
 White paper and component technical specifications for a system that detects impending infrastructure disruption from telemetry using a five-model ML ensemble, raises enriched incidents automatically, and responds through a governed network of GenAI agents.
 

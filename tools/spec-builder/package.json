@@ -1,8 +1,8 @@
 {
-  "name": "pdd-spec-builder",
+  "name": "pidd-spec-builder",
   "version": "1.0.0",
   "private": true,
-  "description": "Builds the PDD technical specifications from Markdown source into styled Word documents",
+  "description": "Builds the PIDD technical specifications from Markdown source into styled Word documents",
   "main": "build.js",
   "scripts": {
     "build": "node build.js ../../docs/specifications/docx ../../docs/specifications/source/TS-*.md"
