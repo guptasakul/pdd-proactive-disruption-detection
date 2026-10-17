@@ -1,0 +1,901 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<style>:root{color-scheme:light;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}body{margin:0;font:14px system-ui,sans-serif}img{max-width:100%}[hidden]{display:none!important}</style>
+</head>
+<body>
+<title>PIDD Console</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+Condensed:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+/* Layout: control-room console. Sticky command bar, fault strip, then two working columns:
+   signals + detection (left), incident handling by agents (right). */
+:root{
+  --bg:#F2F4F8; --panel:#FFFFFF; --ink:#131A2C; --muted:#5A6378; --line:#DBE0EA;
+  --accent:#2343B8; --accent-soft:#E5EAFA; --code:#EEF1F7;
+  --ok:#1D8556; --ok-soft:#E1F2E9; --warn:#A86E12; --warn-soft:#FAEFD8; --crit:#BE342D; --crit-soft:#F8E1DF;
+  --f-display:"IBM Plex Sans Condensed","Arial Narrow",system-ui,sans-serif;
+  --f-body:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --f-mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#0D1220; --panel:#151C2D; --ink:#E5E9F2; --muted:#97A1B7; --line:#262F47;
+  --accent:#8099F3; --accent-soft:#1D294D; --code:#10172A;
+  --ok:#4CC48C; --ok-soft:#12301F; --warn:#E5AA4B; --warn-soft:#33270F; --crit:#F2736B; --crit-soft:#3A1918; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#0D1220; --panel:#151C2D; --ink:#E5E9F2; --muted:#97A1B7; --line:#262F47;
+  --accent:#8099F3; --accent-soft:#1D294D; --code:#10172A;
+  --ok:#4CC48C; --ok-soft:#12301F; --warn:#E5AA4B; --warn-soft:#33270F; --crit:#F2736B; --crit-soft:#3A1918; color-scheme:dark}
+
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font-family:var(--f-body);font-size:14px;line-height:1.45}
+body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);z-index:10;background:var(--panel)}
+.wrap{padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));max-width:1440px;margin:0 auto}
+h1,h2,h3{font-family:var(--f-display);text-wrap:balance;margin:0}
+h2{font-size:15px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+button,select{font:inherit;color:inherit}
+button{cursor:pointer}
+button:focus-visible,select:focus-visible,.tile:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.num{font-variant-numeric:tabular-nums}
+.mono{font-family:var(--f-mono)}
+
+/* command bar */
+.bar{position:sticky;top:env(safe-area-inset-top,0px);z-index:5;background:var(--panel);border-bottom:1px solid var(--line)}
+.bar .wrap{display:flex;flex-wrap:wrap;align-items:center;gap:12px 20px;padding-block:10px}
+.brand{display:flex;align-items:baseline;gap:10px;min-width:0}
+.brand h1{font-size:22px;font-weight:700;letter-spacing:.02em}
+.brand span{color:var(--muted);font-size:13px}
+.clock{font-family:var(--f-mono);font-size:13px;color:var(--muted);display:flex;gap:10px;align-items:center}
+.clock b{color:var(--ink);font-weight:500}
+.live-dot{width:8px;height:8px;border-radius:50%;background:var(--ok)}
+.paused .live-dot{background:var(--muted)}
+.ctrls{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-left:auto}
+.btn{border:1px solid var(--line);background:var(--panel);border-radius:6px;padding:6px 12px;font-size:13px}
+.btn:hover{border-color:var(--accent)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--panel);font-weight:600}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+select.btn{padding-right:8px}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:6px;overflow:hidden}
+.seg button{border:0;background:transparent;padding:6px 10px;font-size:13px}
+.seg button[aria-pressed="true"]{background:var(--accent-soft);color:var(--accent);font-weight:600}
+.seg button:disabled{opacity:.45;cursor:not-allowed}
+
+/* fault strip */
+.inject{padding-block:14px;display:flex;flex-direction:column;gap:8px}
+.inject-head{display:flex;flex-wrap:wrap;gap:6px 14px;align-items:baseline}
+.inject-head p{margin:0;color:var(--muted);font-size:13px}
+.faults{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px}
+.fault{text-align:left;border:1px dashed var(--line);background:transparent;border-radius:8px;padding:8px 10px;display:flex;flex-direction:column;gap:2px}
+.fault b{font-weight:600;font-size:13px}
+.fault small{color:var(--muted);font-size:12px}
+.fault:hover{border-color:var(--accent);border-style:solid}
+.fault.on{border-style:solid;border-color:var(--crit);background:var(--crit-soft)}
+.fault.on small{color:var(--ink)}
+
+/* grid */
+.grid{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,1fr);gap:16px;padding-block:4px 32px;align-items:start}
+@media (max-width:1000px){.grid{grid-template-columns:minmax(0,1fr)}}
+.col{display:flex;flex-direction:column;gap:16px;min-width:0}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px;display:flex;flex-direction:column;gap:12px;min-width:0}
+.panel-head{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:baseline;gap:6px 12px}
+.panel-head .aside{font-size:12px;color:var(--muted)}
+
+/* tiles */
+.tiles{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+@media (max-width:1250px){.tiles{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media (max-width:460px){.tiles{grid-template-columns:minmax(0,1fr)}}
+.tile{border:1px solid var(--line);border-radius:8px;padding:10px;display:flex;flex-direction:column;gap:6px;background:var(--panel);text-align:left;position:relative;min-width:0}
+.tile::before{content:"";position:absolute;left:0;top:10px;bottom:10px;width:3px;border-radius:0 3px 3px 0;background:var(--ok)}
+.tile.warn::before{background:var(--warn)}.tile.crit::before{background:var(--crit)}
+.tile.sel{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
+.tile-top{display:flex;justify-content:space-between;gap:6px;align-items:baseline}
+.tile-top .d{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:600}
+.tile .m{font-size:12px;color:var(--muted)}
+.tile .v{font-family:var(--f-display);font-size:24px;font-weight:600;line-height:1}
+.tile .v small{font-family:var(--f-body);font-size:12px;color:var(--muted);font-weight:400;margin-left:2px}
+.spark{width:100%;height:46px;display:block}
+.scoreline{display:flex;align-items:center;gap:8px;font-size:11px;color:var(--muted)}
+.meter{flex:1;height:6px;background:var(--code);border-radius:3px;position:relative;overflow:visible}
+.meter i{position:absolute;left:0;top:0;bottom:0;border-radius:3px;background:var(--ok)}
+.meter i.warn{background:var(--warn)}.meter i.crit{background:var(--crit)}
+.meter u{position:absolute;top:-3px;bottom:-3px;width:2px;background:var(--ink);opacity:.6}
+
+.pill{display:inline-flex;align-items:center;gap:4px;font-size:11px;font-weight:600;letter-spacing:.04em;padding:2px 7px;border-radius:999px;text-transform:uppercase;white-space:nowrap}
+.pill.ok{background:var(--ok-soft);color:var(--ok)}.pill.warn{background:var(--warn-soft);color:var(--warn)}.pill.crit{background:var(--crit-soft);color:var(--crit)}
+.pill.info{background:var(--accent-soft);color:var(--accent)}.pill.mute{background:var(--code);color:var(--muted)}
+
+/* ensemble */
+.det{display:grid;grid-template-columns:minmax(0,1.4fr) 54px minmax(0,1fr) 40px;gap:4px 10px;align-items:center;font-size:13px}
+.det .h{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+.det .nm b{display:block;font-weight:600}
+.det .nm small{color:var(--muted);font-size:12px}
+.det .w,.det .s{font-family:var(--f-mono);font-size:12px;text-align:right}
+.ens-sum{display:flex;flex-wrap:wrap;gap:8px 18px;align-items:baseline;border-top:1px solid var(--line);padding-top:10px}
+.ens-sum .big{font-family:var(--f-display);font-size:28px;font-weight:700}
+.ens-sum .lbl{font-size:12px;color:var(--muted)}
+
+/* recalibration */
+.rtable{width:100%;border-collapse:collapse;font-size:12px}
+.rtable th,.rtable td{text-align:left;padding:5px 6px;border-bottom:1px solid var(--line)}
+.rtable th{color:var(--muted);font-weight:500}
+.rtable td.n{font-family:var(--f-mono);text-align:right}
+.scroll-x{overflow-x:auto}
+.hist{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:6px;font-size:12px}
+.hist li{background:var(--code);border-radius:6px;padding:6px 8px}
+.delta-up{color:var(--ok)}.delta-dn{color:var(--crit)}
+
+/* incident */
+.stages{display:flex;flex-wrap:wrap;gap:4px;margin:0;padding:0;list-style:none;counter-reset:s}
+.stages li{font-size:12px;padding:4px 8px;border-radius:5px;background:var(--code);color:var(--muted);counter-increment:s}
+.stages li::before{content:counter(s) " · ";opacity:.6}
+.stages li.done{background:var(--ok-soft);color:var(--ok)}
+.stages li.now{background:var(--accent);color:var(--panel);font-weight:600}
+.inc-meta{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:13px;align-items:center}
+.inc-meta .k{color:var(--muted);font-size:12px}
+.empty{color:var(--muted);font-size:13px;border:1px dashed var(--line);border-radius:8px;padding:14px}
+.trace{background:var(--code);border-radius:8px;padding:10px;font-family:var(--f-mono);font-size:12px;max-height:280px;overflow:auto;display:flex;flex-direction:column;gap:6px}
+.trace div{white-space:pre-wrap;word-break:break-word}
+.trace .t-th{color:var(--ink)}
+.trace .t-ac{color:var(--accent)}
+.trace .t-ob{color:var(--muted)}
+.trace .t-no{color:var(--warn)}
+.trace .tag{display:inline-block;min-width:92px;font-weight:500}
+.agents{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+@media (max-width:560px){.agents{grid-template-columns:minmax(0,1fr)}}
+.agent{border:1px solid var(--line);border-radius:8px;padding:10px;display:flex;flex-direction:column;gap:4px;min-width:0}
+.agent h3{font-size:13px;font-weight:600;letter-spacing:.02em;display:flex;justify-content:space-between;gap:6px;align-items:center}
+.agent p{margin:0;font-size:13px}
+.agent ul{margin:0;padding-left:18px;font-size:12px;color:var(--muted)}
+.agent.wait p{color:var(--muted)}
+.actions{display:flex;flex-direction:column;gap:8px}
+.act{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:4px 10px;align-items:start;border:1px solid var(--line);border-radius:8px;padding:10px}
+.act .tier{font-family:var(--f-mono);font-weight:600;font-size:12px;padding:3px 6px;border-radius:5px;text-align:center}
+.tier.T0,.tier.T1{background:var(--ok-soft);color:var(--ok)}
+.tier.T2{background:var(--warn-soft);color:var(--warn)}
+.tier.T3{background:var(--crit-soft);color:var(--crit)}
+.act .what b{font-family:var(--f-mono);font-size:13px;font-weight:500}
+.act .what p{margin:2px 0 0;font-size:12px;color:var(--muted)}
+.act .what .pol{font-size:12px;color:var(--ink)}
+.act .st{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
+@media (max-width:520px){.act{grid-template-columns:auto minmax(0,1fr)}.act .st{grid-column:1/-1;justify-content:flex-start}}
+.feedback{display:flex;flex-wrap:wrap;gap:8px;align-items:center;background:var(--accent-soft);border-radius:8px;padding:10px}
+.feedback p{margin:0;flex:1 1 220px;font-size:13px}
+.note{font-size:12px;color:var(--muted)}
+.policy{font-size:12px;color:var(--muted);display:grid;grid-template-columns:auto minmax(0,1fr);gap:4px 10px;align-items:baseline}
+.log{margin:0;padding:0;list-style:none;font-family:var(--f-mono);font-size:12px;max-height:220px;overflow:auto;display:flex;flex-direction:column;gap:3px}
+.log li{display:grid;grid-template-columns:52px minmax(0,1fr);gap:8px}
+.log li span:first-child{color:var(--muted)}
+.log li.crit span:last-child{color:var(--crit)}.log li.ok span:last-child{color:var(--ok)}.log li.info span:last-child{color:var(--accent)}
+details summary{cursor:pointer;font-size:12px;color:var(--muted)}
+@media (prefers-reduced-motion: reduce){*{transition:none!important;animation:none!important}}
+</style>
+
+<header class="bar" id="bar">
+  <div class="wrap">
+    <div class="brand"><h1>PIDD</h1><span>Proactive infrastructure disruption detection · prototype</span></div>
+    <div class="clock"><span class="live-dot" aria-hidden="true"></span><span>Sim time <b id="clk" class="num">10:00</b> IST</span><span id="tplus" class="num">T+0m</span></div>
+    <div class="ctrls">
+      <div class="seg" role="group" aria-label="Agent mode">
+        <button id="modeLive" aria-pressed="false" title="Agents reason with Claude and call the console's tools">Claude agents</button>
+        <button id="modeScript" aria-pressed="true" title="Deterministic, pre-written reasoning against the same tools">Scripted agents</button>
+      </div>
+      <button class="btn" id="playBtn">Pause</button>
+      <select class="btn" id="speed" aria-label="Simulation speed">
+        <option value="1">1 min / 0.6 s</option>
+        <option value="2" selected>1 min / 0.3 s</option>
+        <option value="4">1 min / 0.15 s</option>
+      </select>
+      <button class="btn" id="resetBtn">Reset</button>
+    </div>
+  </div>
+</header>
+
+<section class="wrap inject" aria-label="Fault injection">
+  <div class="inject-head"><h2>Inject a fault</h2><p id="modeNote">Synthetic banking telemetry. Pick a scenario and watch detection lead the SLO breach.</p></div>
+  <div class="faults" id="faults"></div>
+</section>
+
+<main class="wrap grid">
+  <div class="col">
+    <section class="panel" aria-labelledby="h-dom">
+      <div class="panel-head"><h2 id="h-dom">Six observability domains</h2><span class="aside">Bar = ensemble score · tick = domain threshold θ</span></div>
+      <div class="tiles" id="tiles"></div>
+    </section>
+
+    <section class="panel" aria-labelledby="h-ens">
+      <div class="panel-head"><h2 id="h-ens">Detection ensemble</h2><span class="aside" id="ensDom">Application</span></div>
+      <div class="det" id="det"></div>
+      <div class="ens-sum" id="ensSum"></div>
+    </section>
+
+    <section class="panel" aria-labelledby="h-rec">
+      <div class="panel-head"><h2 id="h-rec">Threshold recalibration</h2><span class="aside">Learns from operator verdicts on closed incidents</span></div>
+      <div class="scroll-x"><table class="rtable" id="wTable"></table></div>
+      <div class="scroll-x"><table class="rtable" id="thTable"></table></div>
+      <ul class="hist" id="recHist"></ul>
+    </section>
+  </div>
+
+  <div class="col">
+    <section class="panel" aria-labelledby="h-inc">
+      <div class="panel-head"><h2 id="h-inc">Incident response</h2><span class="aside" id="incAside">Multi-agent ReAct loop</span></div>
+      <div id="incident"></div>
+    </section>
+
+    <section class="panel" aria-labelledby="h-pol">
+      <div class="panel-head"><h2 id="h-pol">Safety policy</h2><span class="aside">Enforced by the console, not the model</span></div>
+      <div class="policy" id="policy"></div>
+    </section>
+
+    <section class="panel" aria-labelledby="h-log">
+      <div class="panel-head"><h2 id="h-log">Event log</h2></div>
+      <ul class="log" id="log"></ul>
+    </section>
+  </div>
+</main>
+
+<script>
+(() => {
+"use strict";
+
+/* ---------- reference data ---------- */
+const DOMAINS = [
+  {id:"infra", name:"Infrastructure",        metric:"App node memory",        unit:"%",    slo:90,  dir:1,  dp:1, noise:1.2},
+  {id:"app",   name:"Application",           metric:"NetBanking API p95",     unit:"ms",   slo:600, dir:1,  dp:0, noise:10},
+  {id:"db",    name:"Database & storage",    metric:"Core DB tablespace",     unit:"%",    slo:95,  dir:1,  dp:1, noise:0.12},
+  {id:"net",   name:"Network",               metric:"DC–DR link packet loss", unit:"%",    slo:1.0, dir:1,  dp:2, noise:0.015},
+  {id:"sec",   name:"Security",              metric:"Auth failures",          unit:"/min", slo:400, dir:1,  dp:0, noise:5},
+  {id:"biz",   name:"Business transactions", metric:"UPI success rate",       unit:"%",    slo:97,  dir:-1, dp:2, noise:0.08},
+];
+const DMAP = Object.fromEntries(DOMAINS.map(d => [d.id, d]));
+
+const DETECTORS = [
+  {id:"ewma",  name:"EWMA z-score",        desc:"Sudden deviation from recent level"},
+  {id:"cusum", name:"CUSUM drift",         desc:"Slow, persistent shift from baseline"},
+  {id:"seas",  name:"Seasonal residual",   desc:"Deviation from learned time-of-day profile"},
+  {id:"iso",   name:"Isolation forest",    desc:"Unusual level-and-slope combination"},
+  {id:"trend", name:"Trend forecaster",    desc:"Projects time to SLO breach"},
+];
+
+const FAULTS = [
+  {id:"upi_latency",   label:"UPI switch latency creep", desc:"Connector regression after a deploy", fixes:["rollback_deploy"]},
+  {id:"db_tablespace", label:"Core DB tablespace fill",   desc:"Archive logs growing after a retention change", fixes:["expand_volume","purge_archive_logs"]},
+  {id:"memory_leak",   label:"NetBanking memory leak",    desc:"Heap growth on app nodes, latency follows", fixes:["restart_pod","rollback_deploy"]},
+  {id:"link_loss",     label:"DC–DR link degradation",   desc:"Carrier packet loss puts DR replication at risk", fixes:["reroute_link"]},
+  {id:"cred_stuffing", label:"Credential-stuffing burst",  desc:"Login failures surge from a botnet", fixes:["block_ip_range","throttle_traffic"]},
+  {id:"festive_surge", label:"Festive traffic surge",       desc:"Legitimate load from an offer campaign", fixes:["scale_out"]},
+];
+const FMAP = Object.fromEntries(FAULTS.map(f => [f.id, f]));
+
+const ACTIONS = {
+  collect_diagnostics:{tier:"T0", label:"Collect diagnostics"},
+  open_bridge:        {tier:"T0", label:"Open incident bridge"},
+  notify_stakeholders:{tier:"T0", label:"Notify stakeholders"},
+  restart_pod:        {tier:"T1", label:"Rolling restart of pods"},
+  scale_out:          {tier:"T1", label:"Scale out app tier"},
+  expand_volume:      {tier:"T1", label:"Expand storage volume"},
+  rollback_deploy:    {tier:"T2", label:"Roll back deployment"},
+  throttle_traffic:   {tier:"T2", label:"Throttle traffic at edge"},
+  block_ip_range:     {tier:"T2", label:"Block source IP ranges"},
+  reroute_link:       {tier:"T2", label:"Reroute DC–DR over carrier B"},
+  purge_archive_logs: {tier:"T2", label:"Purge archived logs"},
+  failover_dc:        {tier:"T3", label:"Fail over to DR site"},
+};
+const TIER_TEXT = {
+  T0:"Autonomous · read-only or informational",
+  T1:"Autonomous + notify · reversible, small blast radius",
+  T2:"Human approval · changes production behaviour",
+  T3:"Never automated · manual runbook only",
+};
+
+const BASE_CHANGES = [
+  {id:"CHG-20402", when_min_ago:190, system:"DC-2 perimeter firewall", summary:"Quarterly rule review, no rule changes"},
+  {id:"CHG-20411", when_min_ago:310, system:"Reporting servers", summary:"OS security patching"},
+];
+const FAULT_CHANGES = {
+  upi_latency:   {id:"CHG-20431", system:"UPI switch connector", summary:"Deployed v4.12.0 (was v4.11.3): new connection pooling to NPCI gateway"},
+  db_tablespace: {id:"CHG-20418", system:"Core banking DB", summary:"Archive log retention raised from 14 to 45 days"},
+  memory_leak:   {id:"CHG-20427", system:"NetBanking app", summary:"Release 2026.10.3: new session cache for beneficiary lists"},
+  festive_surge: {id:"CAMP-311",  system:"Marketing", summary:"Festive cashback offer push notification sent to 4.2M customers"},
+};
+const TOPOLOGY = {
+  upi:        ["UPI switch connector","NPCI gateway","Core banking (CBS)","Fraud risk engine"],
+  netbanking: ["Web/API gateway","NetBanking app nodes","Session cache","Core banking (CBS)"],
+  cbs:        ["Core banking DB (primary, DC-1)","DR replica (DC-2) via DC–DR link","Archive log volume"],
+  dr:         ["DC–DR link: MPLS carrier A (active)","DC–DR link: carrier B (standby)","DB replication (RPO 15 min)"],
+  identity:   ["WAF","Login service","Customer identity store","Fraud risk engine"],
+};
+const RUNBOOKS = [
+  {id:"RB-UPI-07", title:"UPI latency regression after release", keys:["upi","latency","rollback","deploy"], steps:"Compare connector p95 before/after change; if regression confirmed, roll back connector to prior version; confirm NPCI gateway latency normal."},
+  {id:"RB-DB-03", title:"Tablespace or archive volume nearing capacity", keys:["tablespace","storage","archive","disk","db"], steps:"Expand volume online (safe); purge archived logs older than 14 days only after backup verification."},
+  {id:"RB-APP-11", title:"JVM heap growth on app nodes", keys:["memory","heap","leak","netbanking","restart"], steps:"Rolling restart restores headroom for hours; roll back offending release for permanent fix."},
+  {id:"RB-NET-02", title:"DC–DR link packet loss", keys:["link","packet","loss","dr","network","replication"], steps:"Raise carrier ticket; reroute replication over standby carrier B; verify RPO."},
+  {id:"RB-SEC-05", title:"Credential-stuffing attack", keys:["auth","login","failures","credential","bot","security"], steps:"Block offending ranges at WAF; enable adaptive throttling; assess CERT-In 6-hour reporting."},
+  {id:"RB-CAP-01", title:"Planned or campaign-driven load", keys:["surge","campaign","capacity","load","scale"], steps:"Confirm traffic is legitimate; scale out app tier; no rollback."},
+];
+
+/* ---------- seeded randomness ---------- */
+function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296}}
+let rng;
+function gauss(){let u=0,v=0;while(!u)u=rng();while(!v)v=rng();return Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*v)}
+const clamp=(x,a=0,b=1)=>Math.max(a,Math.min(b,x));
+const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+
+/* ---------- simulation state ---------- */
+let S;
+function freshState(){
+  rng = mulberry32(20261017);
+  S = {
+    t:0, running:true, speed:2, mode:"script", sampleFn:null, liveOK:false,
+    hist:Object.fromEntries(DOMAINS.map(d=>[d.id,[]])),
+    det:{}, weights:[.2,.2,.2,.2,.2], theta:Object.fromEntries(DOMAINS.map(d=>[d.id,.45])),
+    over:Object.fromEntries(DOMAINS.map(d=>[d.id,0])),
+    faults:{}, incident:null, incCount:0, recHist:[], log:[], sel:"app", calm:0,
+  };
+  for(let t=-220;t<=0;t++) step(t,false);
+}
+
+function baseline(id,t){
+  const m=600+t, d=.5+.5*Math.sin(2*Math.PI*(m-540)/1440);
+  switch(id){
+    case"infra":return 52+10*d; case"app":return 180+60*d; case"db":return 71+.002*(t+220);
+    case"net":return .05; case"sec":return 40+25*d; case"biz":return 99.4-.15*d;
+  }
+}
+function faultDelta(id,t,vals){
+  let dx=0;
+  for(const f of Object.values(S.faults)){
+    const k=t-f.start, m=1-f.recovery; if(k<0)continue;
+    switch(f.id){
+      case"upi_latency": if(id==="app")dx+=m*Math.min(4*k,700); if(id==="biz")dx-=m*Math.min(Math.max(0,k-12)*.06,4); break;
+      case"db_tablespace": if(id==="db")dx+=m*Math.min(.3*k,28); break;
+      case"memory_leak": if(id==="infra")dx+=m*Math.min(.45*k,44); if(id==="app"&&vals.infra>85)dx+=(vals.infra-85)*25; break;
+      case"link_loss": if(id==="net")dx+=m*Math.min(.035*k,3); break;
+      case"cred_stuffing": if(id==="sec")dx+=m*Math.min(28*k,1100); break;
+      case"festive_surge":{const s=Math.min(k/5,1); if(id==="infra")dx+=m*9*s; if(id==="app")dx+=m*140*s; if(id==="sec")dx+=m*15*s; break;}
+    }
+  }
+  return dx;
+}
+function step(t,detect=true){
+  const vals={};
+  for(const d of DOMAINS){
+    let v=baseline(d.id,t)+gauss()*d.noise+faultDelta(d.id,t,vals);
+    if(d.id==="net")v=Math.max(0,v);
+    if(d.id==="biz")v=Math.min(100,v);
+    if(d.id==="db"||d.id==="infra")v=Math.min(99.9,v);
+    vals[d.id]=v;
+    const h=S.hist[d.id]; h.push({t,v,b:baseline(d.id,t)}); if(h.length>240)h.shift();
+  }
+  if(detect) for(const d of DOMAINS) S.det[d.id]=detect5(d);
+}
+
+/* ---------- the five detectors ---------- */
+function median(a){const s=[...a].sort((x,y)=>x-y),n=s.length;return n?(n%2?s[(n-1)/2]:(s[n/2-1]+s[n/2])/2):0}
+function sigmaOf(d){
+  const h=S.hist[d.id], ref=h.slice(-160,-25).map(p=>(p.v-p.b)*d.dir);
+  const med=median(ref), mad=median(ref.map(r=>Math.abs(r-med)));
+  return Math.max(mad*1.4826, d.noise*.6);
+}
+function cN(n){return n<=1?0:2*(Math.log(n-1)+.5772)-2*(n-1)/n}
+function isoScore(train,q,seed){
+  const r=mulberry32(seed), T=30, sub=Math.min(64,train.length), maxD=Math.ceil(Math.log2(sub));
+  function build(data,depth){
+    if(depth>=maxD||data.length<=1)return{n:data.length};
+    const f=r()<.5?0:1; let lo=Infinity,hi=-Infinity;
+    for(const p of data){lo=Math.min(lo,p[f]);hi=Math.max(hi,p[f])}
+    if(lo===hi)return{n:data.length};
+    const sp=lo+r()*(hi-lo);
+    return{f,sp,l:build(data.filter(p=>p[f]<sp),depth+1),r:build(data.filter(p=>p[f]>=sp),depth+1)};
+  }
+  function path(nd,x,dp){return nd.n!==undefined?dp+cN(nd.n):path(x[nd.f]<nd.sp?nd.l:nd.r,x,dp+1)}
+  let tot=0;
+  for(let i=0;i<T;i++){
+    const s=[];for(let j=0;j<sub;j++)s.push(train[Math.floor(r()*train.length)]);
+    tot+=path(build(s,0),q,0);
+  }
+  return Math.pow(2,-(tot/T)/cN(sub));
+}
+function detect5(d){
+  const h=S.hist[d.id], n=h.length, sig=sigmaOf(d), x=h[n-1].v;
+  const rz=h.map(p=>(p.v-p.b)*d.dir/sig);
+  // 1 EWMA
+  let m=h[n-61].v, vr=sig*sig;
+  for(let i=n-60;i<n-1;i++){const e=h[i].v-m;m+=.15*e;vr=.85*(vr+.15*e*e)}
+  const zE=(x-m)*d.dir/Math.sqrt(Math.max(vr,sig*sig));
+  const s1=clamp((zE-3)/4);
+  // 2 CUSUM
+  let C=0; for(let i=n-60;i<n;i++)C=Math.max(0,C+rz[i]-1);
+  const s2=clamp((C-5)/20);
+  // 3 seasonal residual
+  const zS=(rz[n-1]+rz[n-2]+rz[n-3])/3;
+  const s3=clamp((zS-3)/5);
+  // 4 isolation forest on (residual, 5-min slope)
+  const feat=i=>[rz[i],(rz[i]-rz[i-5])];
+  const train=[];for(let i=n-160;i<n-5;i++)train.push(feat(i));
+  const iso=isoScore(train,feat(n-1),1234+DOMAINS.indexOf(d));
+  const s4=clamp((iso-.55)/.2)*(rz[n-1]>0?1:.3);
+  // 5 trend forecaster
+  const W=20,ys=h.slice(-W).map(p=>p.v*d.dir);let sx=0,sy=0,sxy=0,sxx=0;
+  ys.forEach((y,i)=>{sx+=i;sy+=y;sxy+=i*y;sxx+=i*i});
+  const b=(W*sxy-sx*sy)/(W*sxx-sx*sx), lim=d.slo*d.dir, now=ys[W-1];
+  let ttb=null,s5=0;
+  if(now>=lim){ttb=0;s5=1}
+  else if(b>0&&b*W>2.5*sig){ttb=(lim-now)/b;s5=clamp(1-ttb/120)}
+  const scores=[s1,s2,s3,s4,s5];
+  const ens=scores.reduce((a,s,i)=>a+s*S.weights[i],0);
+  const breached=d.dir>0?x>=d.slo:x<=d.slo;
+  return{scores,ens,ttb,sig,breached,x,base:h[n-1].b};
+}
+
+/* ---------- formatting ---------- */
+const fmt=(d,v)=>v.toFixed(d.dp);
+function clock(t){const m=600+t, h=Math.floor(m/60)%24, mm=m%60;return String(h).padStart(2,"0")+":"+String(mm).padStart(2,"0")}
+function state(d){const r=S.det[d.id];if(!r)return"ok";if(r.breached||r.ens>=S.theta[d.id])return"crit";if(r.ens>=S.theta[d.id]*.55)return"warn";return"ok"}
+function log(msg,cls=""){S.log.unshift({t:S.t,msg,cls});if(S.log.length>120)S.log.pop();renderLog()}
+
+/* ---------- static UI ---------- */
+const $=id=>document.getElementById(id);
+function renderFaults(){
+  $("faults").innerHTML=FAULTS.map(f=>`<button class="fault${S.faults[f.id]?" on":""}" data-f="${f.id}" aria-pressed="${!!S.faults[f.id]}"><b>${esc(f.label)}</b><small>${S.faults[f.id]?(S.faults[f.id].recovery>0?"Recovering…":"Active since "+clock(S.faults[f.id].start)):esc(f.desc)}</small></button>`).join("");
+}
+$("faults").addEventListener("click",e=>{
+  const b=e.target.closest(".fault");if(!b)return;
+  const id=b.dataset.f;
+  if(S.faults[id]){delete S.faults[id];log(`Fault cleared manually: ${FMAP[id].label}`)}
+  else{S.faults[id]={id,start:S.t,recovery:0,mitigating:false};log(`Fault injected: ${FMAP[id].label}`,"crit")}
+  renderFaults();
+});
+function renderPolicy(){
+  $("policy").innerHTML=Object.entries(TIER_TEXT).map(([k,v])=>`<span class="tier ${k} mono" style="padding:2px 6px;border-radius:4px;font-weight:600">${k}</span><span>${v}: ${Object.entries(ACTIONS).filter(([,a])=>a.tier===k).map(([n])=>`<span class="mono">${n}</span>`).join(", ")}</span>`).join("")+
+  `<span class="tier T2 mono" style="padding:2px 6px;border-radius:4px;font-weight:600">P1</span><span>On a P1 incident, every T1 action is elevated to T2 and waits for a human.</span>`;
+}
+
+/* ---------- tiles ---------- */
+function sparkSVG(d){
+  const h=S.hist[d.id].slice(-120), W=240, H=46, P=3;
+  const vs=h.map(p=>p.v).concat([d.slo]);
+  let lo=Math.min(...vs),hi=Math.max(...vs);const pad=(hi-lo)*.08||1;lo-=pad;hi+=pad;
+  const X=i=>P+(W-2*P)*i/(h.length-1), Y=v=>H-P-(H-2*P)*(v-lo)/(hi-lo);
+  const line=h.map((p,i)=>(i?"L":"M")+X(i).toFixed(1)+" "+Y(p.v).toFixed(1)).join("");
+  const area=line+`L${X(h.length-1).toFixed(1)} ${H-P}L${X(0).toFixed(1)} ${H-P}Z`;
+  const st=state(d), col=st==="crit"?"var(--crit)":st==="warn"?"var(--warn)":"var(--accent)";
+  const last=h[h.length-1];
+  return`<svg class="spark" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-hidden="true">
+    <line x1="${P}" x2="${W-P}" y1="${Y(d.slo).toFixed(1)}" y2="${Y(d.slo).toFixed(1)}" stroke="var(--crit)" stroke-dasharray="3 3" stroke-width="1" opacity=".7" vector-effect="non-scaling-stroke"/>
+    <path d="${area}" fill="${col}" opacity=".12"/>
+    <path d="${line}" fill="none" stroke="${col}" stroke-width="1.6" vector-effect="non-scaling-stroke"/>
+    <circle cx="${X(h.length-1).toFixed(1)}" cy="${Y(last.v).toFixed(1)}" r="2.6" fill="${col}"/>
+  </svg>`;
+}
+function renderTiles(){
+  $("tiles").innerHTML=DOMAINS.map(d=>{
+    const r=S.det[d.id], st=state(d), th=S.theta[d.id];
+    const pill=r.breached?`<span class="pill crit">SLO breach</span>`:st==="crit"?`<span class="pill crit">Anomaly</span>`:st==="warn"?`<span class="pill warn">Watch</span>`:`<span class="pill ok">Normal</span>`;
+    return`<button class="tile ${st}${S.sel===d.id?" sel":""}" data-d="${d.id}" aria-label="${esc(d.name)} details">
+      <div class="tile-top"><span class="d">${esc(d.name)}</span>${pill}</div>
+      <div class="m">${esc(d.metric)} · SLO ${d.dir>0?"≤":"≥"} ${d.slo}${d.unit}</div>
+      <div class="v num">${fmt(d,r.x)}<small>${d.unit}</small></div>
+      ${sparkSVG(d)}
+      <div class="scoreline"><span class="num">${r.ens.toFixed(2)}</span><span class="meter"><i class="${st==="ok"?"":st}" style="width:${(r.ens*100).toFixed(0)}%"></i><u style="left:${(th*100).toFixed(0)}%"></u></span><span>${r.ttb!=null&&!r.breached?"breach ~"+Math.round(r.ttb)+"m":r.breached?"breached":"no trend"}</span></div>
+    </button>`}).join("");
+}
+$("tiles").addEventListener("click",e=>{const b=e.target.closest(".tile");if(!b)return;S.sel=b.dataset.d;renderTiles();renderEnsemble()});
+
+function renderEnsemble(){
+  const d=DMAP[S.sel], r=S.det[d.id];
+  $("ensDom").textContent=`${d.name} · ${d.metric}`;
+  $("det").innerHTML=`<span class="h">Model</span><span class="h" style="text-align:right">Weight</span><span class="h">Score</span><span class="h" style="text-align:right"></span>`+
+    DETECTORS.map((m,i)=>{const s=r.scores[i],cls=s>=.6?"crit":s>=.3?"warn":"";return`<span class="nm"><b>${m.name}</b><small>${m.desc}</small></span><span class="w num">${S.weights[i].toFixed(3)}</span><span class="meter"><i class="${cls}" style="width:${(s*100).toFixed(0)}%"></i></span><span class="s num">${s.toFixed(2)}</span>`}).join("");
+  const th=S.theta[d.id], st=state(d);
+  $("ensSum").innerHTML=`<div><div class="lbl">Ensemble score</div><div class="big num" style="color:${st==="crit"?"var(--crit)":st==="warn"?"var(--warn)":"var(--ink)"}">${r.ens.toFixed(2)}</div></div>
+   <div><div class="lbl">Threshold θ</div><div class="big num">${th.toFixed(2)}</div></div>
+   <div><div class="lbl">Projected SLO breach</div><div class="big num">${r.breached?"now":r.ttb!=null?"~"+Math.round(r.ttb)+" min":"—"}</div></div>
+   <div><div class="lbl">Now vs learned baseline</div><div class="big num" style="font-size:20px">${fmt(d,r.x)} / ${fmt(d,r.base)}${d.unit}</div></div>`;
+}
+
+function renderRecal(){
+  $("wTable").innerHTML=`<tr><th>Model weight</th>${DETECTORS.map(m=>`<th style="text-align:right">${m.name.split(" ")[0]}</th>`).join("")}</tr><tr><td>Current</td>${S.weights.map(w=>`<td class="n">${w.toFixed(3)}</td>`).join("")}</tr>`;
+  $("thTable").innerHTML=`<tr><th>Domain θ</th>${DOMAINS.map(d=>`<th style="text-align:right">${d.name.split(" ")[0]}</th>`).join("")}</tr><tr><td>Current</td>${DOMAINS.map(d=>`<td class="n">${S.theta[d.id].toFixed(2)}</td>`).join("")}</tr>`;
+  $("recHist").innerHTML=S.recHist.length?S.recHist.map(h=>`<li>${h}</li>`).join(""):`<li class="note">No verdicts yet. Close an incident as a true or false positive to see weights and thresholds adapt.</li>`;
+}
+function renderLog(){
+  $("log").innerHTML=S.log.map(l=>`<li class="${l.cls}"><span>${clock(l.t)}</span><span>${esc(l.msg)}</span></li>`).join("");
+}
+
+/* ---------- incidents ---------- */
+const STAGES=["Detected","Investigating","Plan proposed","Remediating","Recovered","Closed"];
+function openIncident(dId){
+  const d=DMAP[dId], r=S.det[dId];
+  S.incCount++;
+  const active=Object.values(S.faults).filter(f=>f.recovery<1).map(f=>f.id);
+  S.incident={
+    id:"INC-"+(4100+S.incCount), domain:dId, openedAt:S.t, stage:1,
+    snap:{scores:[...r.scores],ens:r.ens,ttb:r.ttb,theta:S.theta[dId]},
+    faultId:pickFault(dId,active), trace:[], result:null, actions:[], error:null, mode:S.mode,
+    related:[], ctl:null, verdict:null,
+  };
+  S.sel=dId;
+  log(`${S.incident.id} opened: ${d.name} ensemble ${r.ens.toFixed(2)} ≥ θ ${S.theta[dId].toFixed(2)}${r.ttb!=null&&!r.breached?`, SLO breach projected in ~${Math.round(r.ttb)} min`:""}`,"crit");
+  renderIncident();
+  runAgents();
+}
+function pickFault(dId,active){
+  const prefer={app:["upi_latency","memory_leak","festive_surge"],biz:["upi_latency"],db:["db_tablespace"],infra:["memory_leak","festive_surge"],net:["link_loss"],sec:["cred_stuffing","festive_surge"]};
+  return (prefer[dId]||[]).find(f=>active.includes(f))||active[0]||null;
+}
+function addTrace(kind,text){S.incident.trace.push({kind,text});renderTrace()}
+
+/* agent tools — run against live console state in both modes */
+function domainSummary(id){
+  const d=DMAP[id];if(!d)throw new Error("Unknown domain. Use one of: "+DOMAINS.map(x=>x.id).join(", "));
+  const r=S.det[id], h=S.hist[id];
+  return{domain:id,name:d.name,metric:d.metric,unit:d.unit,slo:(d.dir>0?"<= ":">= ")+d.slo,
+    current:+fmt(d,r.x),learned_baseline:+fmt(d,r.base),last_15_min:h.slice(-15).map(p=>+fmt(d,p.v)),
+    ensemble_score:+r.ens.toFixed(2),threshold:+S.theta[id].toFixed(2),
+    detector_scores:Object.fromEntries(DETECTORS.map((m,i)=>[m.id,+r.scores[i].toFixed(2)])),
+    minutes_to_slo_breach:r.breached?0:r.ttb!=null?Math.round(r.ttb):null};
+}
+const TOOLS={
+  get_domain_metrics:{description:"Current metric, learned baseline, last 15 minutes, ensemble and detector scores and projected minutes to SLO breach for one observability domain. Domains: infra, app, db, net, sec, biz.",
+    inputSchema:{type:"object",properties:{domain:{type:"string",enum:DOMAINS.map(d=>d.id)}},required:["domain"]},
+    run:a=>domainSummary(String(a.domain||""))},
+  get_recent_changes:{description:"Change and campaign records from the last 6 hours, newest first, with minutes since each change.",
+    inputSchema:{type:"object",properties:{}},
+    run:()=>{
+      const list=[...BASE_CHANGES];
+      for(const f of Object.values(S.faults)){const c=FAULT_CHANGES[f.id];if(c)list.push({id:c.id,when_min_ago:S.t-f.start+(f.id==="db_tablespace"?95:f.id==="festive_surge"?2:6),system:c.system,summary:c.summary})}
+      return list.sort((a,b)=>a.when_min_ago-b.when_min_ago);
+    }},
+  get_topology:{description:"Dependency chain for a service. Services: upi, netbanking, cbs, dr, identity.",
+    inputSchema:{type:"object",properties:{service:{type:"string",enum:Object.keys(TOPOLOGY)}},required:["service"]},
+    run:a=>{const t=TOPOLOGY[String(a.service||"")];if(!t)throw new Error("Unknown service. Use: "+Object.keys(TOPOLOGY).join(", "));return{service:a.service,chain:t}}},
+  search_runbooks:{description:"Keyword search over the operations runbook library. Returns matching runbook ids, titles and steps.",
+    inputSchema:{type:"object",properties:{query:{type:"string"}},required:["query"]},
+    run:a=>{const q=String(a.query||"").toLowerCase();const hits=RUNBOOKS.map(r=>({r,s:r.keys.filter(k=>q.includes(k)).length})).filter(x=>x.s>0).sort((a,b)=>b.s-a.s).slice(0,3).map(x=>({id:x.r.id,title:x.r.title,steps:x.r.steps}));return hits.length?hits:"No runbook matched. Try words like latency, storage, memory, link, login, surge."}},
+};
+function brief(o){const s=JSON.stringify(o);return s.length>260?s.slice(0,257)+"…":s}
+function callTool(name,args){
+  addTrace("ac",`${name}(${JSON.stringify(args||{})})`);
+  try{const out=TOOLS[name].run(args||{});addTrace("ob",brief(out));return out}
+  catch(e){addTrace("ob","Error: "+e.message);throw e}
+}
+
+/* scripted agents */
+const SCRIPT={
+  upi_latency:{steps:[
+    ["Triage: application latency is climbing steadily, not spiking. Check whether payments are affected yet.","get_domain_metrics",{domain:"biz"}],
+    ["Correlation: look at the UPI dependency chain to see where latency could originate.","get_topology",{service:"upi"}],
+    ["Change intelligence: a gradual regression usually follows a change. Pull recent changes.","get_recent_changes",{}],
+    ["Remediation: CHG-20431 lines up with the onset. Find the runbook.","search_runbooks",{query:"upi latency rollback deploy"}]],
+   result:{triage:{severity:"P1",customer_impact:"UPI pay and collect responses are slowing; success rate will slip below SLO if the trend holds.",summary:"Gradual p95 latency regression on the payment path."},
+    correlation:{root_cause:"Latency regression in the UPI switch connector after v4.12.0 introduced new connection pooling to the NPCI gateway.",confidence:.82,evidence:["Latency rise began minutes after CHG-20431","Linear growth pattern consistent with pool exhaustion","No storage, network or security anomaly in parallel"]},
+    change:{suspect_change:"CHG-20431",reasoning:"Only change on the UPI path in the window; onset aligns within minutes."},
+    remediation:{actions:[{action_type:"collect_diagnostics",target:"UPI switch connector pods",rationale:"Capture pool and thread dumps before rollback."},{action_type:"rollback_deploy",target:"UPI switch connector v4.12.0 → v4.11.3",rationale:"RB-UPI-07: roll back on confirmed regression."},{action_type:"notify_stakeholders",target:"Digital payments ops, NPCI liaison desk",rationale:"Customer-facing payment path."}]},
+    compliance:{regulatory_assessment:"Customer-facing payment degradation with no sign of a cyber incident. If UPI success stays below SLO, assess RBI outage reporting and NPCI notification. CERT-In reporting not indicated on current evidence.",reportable:false},
+    communications:{stakeholder_update:"We are seeing slower UPI responses since a connector release. A rollback is proposed and awaiting approval. Payments are still succeeding; we will update within 15 minutes."},benign:false}},
+  db_tablespace:{steps:[
+    ["Triage: core DB tablespace is rising fast. How long until it fills?","get_domain_metrics",{domain:"db"}],
+    ["Correlation: check what writes to this volume.","get_topology",{service:"cbs"}],
+    ["Change intelligence: look for a retention or batch change.","get_recent_changes",{}],
+    ["Remediation: find the storage runbook.","search_runbooks",{query:"tablespace archive storage"}]],
+   result:{triage:{severity:"P2",customer_impact:"None yet. If the volume fills, core banking posting stops for all channels.",summary:"Predictive alert: archive volume trending to exhaustion."},
+    correlation:{root_cause:"Archive logs accumulating after retention was raised from 14 to 45 days, so nightly purge no longer frees space.",confidence:.78,evidence:["Linear fill rate with no traffic change","CHG-20418 changed archive retention","Other domains normal"]},
+    change:{suspect_change:"CHG-20418",reasoning:"Retention change explains steady growth without load growth."},
+    remediation:{actions:[{action_type:"expand_volume",target:"Core DB archive volume +500 GB",rationale:"Online, reversible headroom per RB-DB-03."},{action_type:"purge_archive_logs",target:"Archived logs older than 14 days",rationale:"Restores normal footprint; needs backup verification."},{action_type:"notify_stakeholders",target:"DBA on-call, change manager",rationale:"Retention change needs review at CAB."}]},
+    compliance:{regulatory_assessment:"No customer impact yet. Purging logs touches audit retention, so confirm the 45-day requirement behind CHG-20418 before deleting anything.",reportable:false},
+    communications:{stakeholder_update:"Core DB archive storage will fill in about an hour on current trend. We are expanding the volume now and proposing a purge for approval. No customer impact."},benign:false}},
+  memory_leak:{steps:[
+    ["Triage: app node memory is rising steadily. Check whether latency is following.","get_domain_metrics",{domain:"app"}],
+    ["Correlation: map the NetBanking request path.","get_topology",{service:"netbanking"}],
+    ["Change intelligence: check releases on NetBanking.","get_recent_changes",{}],
+    ["Remediation: look up the heap-growth runbook.","search_runbooks",{query:"memory heap leak netbanking"}]],
+   result:{triage:{severity:"P2",customer_impact:"NetBanking pages will slow, then time out once nodes exhaust heap.",summary:"Steady heap growth on app nodes after a release."},
+    correlation:{root_cause:"Unbounded session cache for beneficiary lists added in release 2026.10.3 leaks heap on every login.",confidence:.74,evidence:["Memory climbs linearly from release time","Latency starts degrading as heap passes 85%","No traffic increase"]},
+    change:{suspect_change:"CHG-20427",reasoning:"New session cache matches the growth pattern."},
+    remediation:{actions:[{action_type:"restart_pod",target:"NetBanking app nodes, rolling",rationale:"Restores headroom for several hours per RB-APP-11."},{action_type:"rollback_deploy",target:"NetBanking release 2026.10.3",rationale:"Permanent fix until the cache is bounded."},{action_type:"notify_stakeholders",target:"Digital channels ops, release manager",rationale:"Release needs a fix-forward plan."}]},
+    compliance:{regulatory_assessment:"Internal availability risk with no data exposure. No reporting obligation unless customer outage occurs.",reportable:false},
+    communications:{stakeholder_update:"NetBanking nodes are leaking memory since last night's release. A rolling restart is under way and a rollback is proposed. Customers are not yet affected."},benign:false}},
+  link_loss:{steps:[
+    ["Triage: packet loss on the DC–DR link is rising. Check replication exposure.","get_topology",{service:"dr"}],
+    ["Correlation: confirm the core DB itself is healthy.","get_domain_metrics",{domain:"db"}],
+    ["Change intelligence: any network changes?","get_recent_changes",{}],
+    ["Remediation: find the link runbook.","search_runbooks",{query:"link packet loss dr"}]],
+   result:{triage:{severity:"P2",customer_impact:"None live. DR replication lag will exceed the 15-minute RPO if loss continues.",summary:"Carrier-side degradation on the active DC–DR link."},
+    correlation:{root_cause:"Packet loss on MPLS carrier A between DC-1 and DC-2; no internal change explains it.",confidence:.7,evidence:["Loss rising steadily","Firewall change CHG-20402 made no rule changes","Primary DB and apps normal"]},
+    change:{suspect_change:"none",reasoning:"No relevant change in window; points to the carrier."},
+    remediation:{actions:[{action_type:"open_bridge",target:"Network on-call, carrier A NOC",rationale:"Carrier ticket and joint triage."},{action_type:"reroute_link",target:"Replication over standby carrier B",rationale:"RB-NET-02: protects RPO."},{action_type:"notify_stakeholders",target:"BCP coordinator, DBA on-call",rationale:"DR readiness at risk."}]},
+    compliance:{regulatory_assessment:"DR readiness is part of business continuity expectations. Record RPO exposure for the BCP log; not reportable unless DR is invoked.",reportable:false},
+    communications:{stakeholder_update:"Our primary DC-to-DR link is losing packets on the carrier side. We propose moving replication to the standby carrier. Production is unaffected."},benign:false}},
+  cred_stuffing:{steps:[
+    ["Triage: login failures are surging far above the daily pattern. Check payments for knock-on effects.","get_domain_metrics",{domain:"biz"}],
+    ["Correlation: map the login path.","get_topology",{service:"identity"}],
+    ["Change intelligence: rule out a login release.","get_recent_changes",{}],
+    ["Remediation: find the attack runbook.","search_runbooks",{query:"credential login auth failures"}]],
+   result:{triage:{severity:"P1",customer_impact:"Customer accounts at risk of takeover; genuine logins may be slowed by the load.",summary:"Credential-stuffing attack on the login service."},
+    correlation:{root_cause:"Automated login attempts with breached credential lists, concentrated on a small set of source ranges.",confidence:.85,evidence:["Failure rate many times the learned profile","No login-service change","Pattern consistent with botnet traffic"]},
+    change:{suspect_change:"none",reasoning:"External attack, not change-induced."},
+    remediation:{actions:[{action_type:"block_ip_range",target:"Top offending source ranges at WAF",rationale:"RB-SEC-05 first containment."},{action_type:"throttle_traffic",target:"Adaptive rate limits on /login",rationale:"Slows distributed attempts."},{action_type:"notify_stakeholders",target:"SOC, CISO office, fraud operations",rationale:"Security incident handling."}]},
+    compliance:{regulatory_assessment:"Likely a reportable cyber incident. Prepare a CERT-In report within the 6-hour window and assess RBI cyber incident reporting. Preserve WAF and login logs.",reportable:true},
+    communications:{stakeholder_update:"We are containing a credential-stuffing attack on customer login. Blocking and rate limiting are proposed for approval. Regulatory reporting is being prepared."},benign:false}},
+  festive_surge:{steps:[
+    ["Triage: latency and memory jumped together as a step, not a creep. Check security for attack traffic.","get_domain_metrics",{domain:"sec"}],
+    ["Change intelligence: look for a campaign or release at the step time.","get_recent_changes",{}],
+    ["Remediation: find the capacity runbook.","search_runbooks",{query:"surge campaign capacity"}]],
+   result:{triage:{severity:"P3",customer_impact:"Slightly slower pages; well inside SLO.",summary:"Load step from a marketing campaign."},
+    correlation:{root_cause:"Legitimate traffic from the festive cashback push notification, not a fault.",confidence:.8,evidence:["Step change matches CAMP-311 send time","Auth failures in proportion to traffic","Payments success normal"]},
+    change:{suspect_change:"CAMP-311",reasoning:"Campaign explains the step; no technical change."},
+    remediation:{actions:[{action_type:"scale_out",target:"NetBanking app tier +4 nodes",rationale:"RB-CAP-01: absorb campaign load."},{action_type:"notify_stakeholders",target:"Marketing ops",rationale:"Ask for advance notice of future pushes."}]},
+    compliance:{regulatory_assessment:"No regulatory relevance.",reportable:false},
+    communications:{stakeholder_update:"The spike is campaign traffic. We are adding capacity. No customer issue. Please share campaign schedules with operations in advance."},benign:true}},
+};
+const GENERIC_STEPS=d=>[[`Triage: ${DMAP[d].name} crossed its threshold. Read the domain.`,"get_domain_metrics",{domain:d}],["Change intelligence: check recent changes.","get_recent_changes",{}]];
+
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+async function runScripted(inc){
+  const sc=SCRIPT[inc.faultId];
+  const steps=sc?sc.steps:GENERIC_STEPS(inc.domain);
+  for(const[th,tool,args]of steps){
+    if(S.incident!==inc)return;
+    addTrace("th","Thought: "+th);await sleep(700);
+    if(S.incident!==inc)return;
+    try{callTool(tool,args)}catch{}
+    await sleep(700);
+  }
+  if(S.incident!==inc)return;
+  const res=sc?sc.result:{triage:{severity:"P3",customer_impact:"Unclear.",summary:"Anomaly with no matching scenario."},correlation:{root_cause:"Natural variation or an unknown cause.",confidence:.3,evidence:["No correlated change"]},change:{suspect_change:"none",reasoning:"Nothing relevant."},remediation:{actions:[{action_type:"collect_diagnostics",target:DMAP[inc.domain].name,rationale:"Gather data for review."}]},compliance:{regulatory_assessment:"None.",reportable:false},communications:{stakeholder_update:"Monitoring an anomaly; no action needed yet."},benign:false};
+  addTrace("th","Thought: Evidence is sufficient. Handing the plan to the safety gate.");
+  applyResult(inc,structuredClone(res));
+}
+
+/* live Claude agents */
+function livePrompt(inc){
+  const d=DMAP[inc.domain], r=S.det[inc.domain];
+  const others=DOMAINS.filter(x=>x.id!==inc.domain).map(x=>`- ${x.id} (${x.name}, ${x.metric}): ${fmt(x,S.det[x.id].x)}${x.unit}, baseline ${fmt(x,S.det[x.id].base)}${x.unit}, ensemble ${S.det[x.id].ens.toFixed(2)}`).join("\n");
+  return `You are PIDD's incident response team for the production estate of an Indian bank. Six specialist agents work this incident together in a ReAct loop (reason, act with a tool, observe, repeat): Triage, Correlation & RCA, Change Intelligence, Remediation Planner, Safety & Compliance, Communications.
+
+Incident ${inc.id} opened at ${clock(inc.openedAt)} IST on domain "${d.id}" (${d.name}, ${d.metric}). Ensemble anomaly score ${inc.snap.ens.toFixed(2)} vs threshold ${inc.snap.theta.toFixed(2)}. Detector scores: ${DETECTORS.map((m,i)=>m.name+" "+inc.snap.scores[i].toFixed(2)).join(", ")}. Projected SLO breach: ${r.breached?"already breached":inc.snap.ttb!=null?"~"+Math.round(inc.snap.ttb)+" min":"no trend"}.
+Other domains now:
+${others}
+
+Investigate with the tools before concluding: the affected domain, any related domain, recent changes, the topology of the affected service, and runbooks. Before each tool call write one short line starting "Thought:" that names which agent is reasoning. Use only facts the tools return. Keep the investigation to at most 5 tool calls.
+
+Each proposed action_type must be exactly one of: ${Object.keys(ACTIONS).join(", ")}. Propose 1-4 actions in execution order. Safety tiers are assigned by policy outside your control, so propose what is right, not what is easy to approve. If the evidence shows legitimate load rather than a fault, set benign to true and propose only capacity or notification actions. For compliance, consider RBI, NPCI and CERT-In (6-hour cyber incident reporting) obligations where relevant.
+
+Your final message must be only this JSON object:
+{"triage":{"severity":"P1|P2|P3","customer_impact":"one sentence","summary":"one sentence"},
+ "correlation":{"root_cause":"one or two sentences","confidence":0.0,"evidence":["short fact","short fact"]},
+ "change":{"suspect_change":"change id or none","reasoning":"one sentence"},
+ "remediation":{"actions":[{"action_type":"...","target":"what it acts on","rationale":"one sentence"}]},
+ "compliance":{"regulatory_assessment":"one or two sentences","reportable":false},
+ "communications":{"stakeholder_update":"two or three plain sentences for business stakeholders"},
+ "benign":false}`;
+}
+async function runLive(inc){
+  const sample=S.sampleFn;
+  let text="",cursor=0;
+  const flushThoughts=()=>{
+    const chunk=text.slice(cursor);const lines=chunk.split("\n");
+    const complete=chunk.endsWith("\n")?lines:lines.slice(0,-1);
+    let used=0;
+    for(const ln of complete){used+=ln.length+1;const m=ln.trim();if(/^thought:/i.test(m))addTrace("th",m)}
+    cursor+=used;
+  };
+  const tools=Object.entries(TOOLS).map(([name,t])=>({name,description:t.description,inputSchema:t.inputSchema,
+    execute:(input)=>{if(S.incident!==inc)throw new Error("Incident closed");flushThoughts();return callTool(name,input)}}));
+  inc.ctl=new AbortController();
+  addTrace("no","Waiting for Claude. The first call asks you to allow this page to use your Claude account.");
+  renderIncident();
+  const opts={signal:inc.ctl.signal,onText:({text:t})=>{text=t;flushThoughts()}};
+  let res;
+  try{
+    let canTools=true;
+    try{const lim=await sample.limits();canTools=!!lim.tools}catch{canTools=false}
+    if(canTools) res=await sample.json(livePrompt(inc),{...opts,tools});
+    else{
+      addTrace("no","Page tools unavailable in this view. Sending a context snapshot instead.");
+      const ctx={affected:domainSummary(inc.domain),changes:TOOLS.get_recent_changes.run({}),runbooks:RUNBOOKS.map(r=>({id:r.id,title:r.title,steps:r.steps})),topology:TOPOLOGY};
+      res=await sample.json(livePrompt(inc).replace(/Investigate with the tools[\s\S]*?5 tool calls\./,"Tool access is unavailable. Here is the evidence the tools would return:\n"+JSON.stringify(ctx)),{...opts,cache:false});
+    }
+  }catch(e){
+    if(S.incident!==inc)return;
+    const code=e&&e.code;
+    if(code==="cancelled"){addTrace("no","Stopped by operator.");inc.error="Investigation stopped.";renderIncident();return}
+    const msg={not_granted:"Claude access was not allowed for this page. Switching this incident to scripted agents.",sampling_disabled:"Claude is not available for this account. Switching to scripted agents.",rate_limited:"Claude usage limit reached for now. Switching to scripted agents.",invalid_json:"Claude's final answer was not valid JSON. Switching to scripted agents.",refused:"Claude declined this request. Switching to scripted agents."}[code]||"Claude call failed ("+(code||"unknown")+"). Switching to scripted agents.";
+    addTrace("no",msg);log(msg,"crit");
+    if(["not_granted","sampling_disabled","not_declared","capability_disabled"].includes(code)){S.liveOK=false;setMode("script")}
+    inc.mode="script";inc.trace.push({kind:"no",text:"— scripted agents take over —"});
+    return runScripted(inc);
+  }
+  if(S.incident!==inc)return;
+  flushThoughts();
+  applyResult(inc,res);
+}
+
+function runAgents(){
+  const inc=S.incident;
+  log(`${inc.id}: agents investigating (${S.mode==="live"?"Claude":"scripted"})`,"info");
+  if(S.mode==="live"&&S.sampleFn)runLive(inc);else{inc.mode="script";runScripted(inc)}
+}
+
+/* safety gate — deterministic, independent of the model */
+function classify(a,severity){
+  const def=ACTIONS[a.action_type];
+  if(!def)return{tier:"T3",why:"Unrecognised action type, blocked."};
+  if(def.tier==="T1"&&severity==="P1")return{tier:"T2",why:"T1 elevated to T2 because the incident is P1."};
+  return{tier:def.tier,why:TIER_TEXT[def.tier]};
+}
+function applyResult(inc,res){
+  if(!res||typeof res!=="object"){inc.error="Agents returned no plan.";renderIncident();return}
+  inc.result=res;
+  const sev=String(res.triage?.severity||"P3").toUpperCase();
+  const acts=Array.isArray(res.remediation?.actions)?res.remediation.actions.slice(0,5):[];
+  inc.actions=acts.map(a=>{const c=classify(a,sev);return{...a,action_type:String(a.action_type||""),tier:c.tier,why:c.why,status:c.tier==="T3"?"manual":(c.tier==="T2"?"awaiting":"queued")}});
+  inc.stage=2;
+  log(`${inc.id}: plan proposed, severity ${sev}, ${inc.actions.length} action(s)`,"info");
+  renderIncident();
+  (async()=>{
+    for(const a of inc.actions){if(a.status==="queued"){await sleep(600);if(S.incident!==inc)return;execAction(inc,a,"auto")}}
+  })();
+}
+function execAction(inc,a,how){
+  a.status="done";
+  if(inc.stage<3)inc.stage=3;
+  const f=inc.faultId&&S.faults[inc.faultId];
+  const fixes=f&&FMAP[f.id].fixes.includes(a.action_type);
+  if(fixes&&!f.mitigating){f.mitigating=true;a.effect="Fix applied. Watching for recovery."}
+  else if(fixes)a.effect="Applied. Recovery already under way.";
+  else a.effect=ACTIONS[a.action_type]?.tier==="T0"?"Done.":"Applied. No direct effect on the anomaly.";
+  log(`${inc.id}: ${how==="auto"?"auto-executed":"approved and executed"} ${a.action_type} → ${a.target||""}`,how==="auto"?"":"ok");
+  renderIncident();renderFaults();
+}
+
+/* ---------- incident rendering ---------- */
+function renderTrace(){
+  const el=document.querySelector(".trace");if(!el||!S.incident)return;
+  const near=el.scrollHeight-el.scrollTop-el.clientHeight<40;
+  el.innerHTML=S.incident.trace.map(x=>{const tag={th:"Thought",ac:"Action",ob:"Observation",no:"Note"}[x.kind];const body=x.kind==="th"?x.text.replace(/^thought:\s*/i,""):x.text;return`<div class="t-${x.kind}"><span class="tag">${tag}</span>${esc(body)}</div>`}).join("")||`<div class="t-ob">Starting…</div>`;
+  if(near)el.scrollTop=el.scrollHeight;
+}
+function agentCard(title,body,badge){return`<div class="agent${body?"":" wait"}"><h3><span>${title}</span>${badge||""}</h3>${body||"<p>Working…</p>"}</div>`}
+function renderIncident(){
+  const box=$("incident"), inc=S.incident;
+  if(!inc){
+    box.innerHTML=`<div class="empty">No open incident. All six domains are inside their thresholds. Inject a fault above. The ensemble opens an incident once a domain's score holds above θ for two minutes, usually well before the SLO line is crossed.</div>`;
+    $("incAside").textContent="Multi-agent ReAct loop";return;
+  }
+  const d=DMAP[inc.domain], r=inc.result;
+  $("incAside").textContent=inc.mode==="live"?"Agents: Claude":"Agents: scripted";
+  const stages=STAGES.map((s,i)=>`<li class="${i<inc.stage?"done":i===inc.stage?"now":""}">${s}</li>`).join("");
+  const sevPill=r?`<span class="pill ${r.triage?.severity==="P1"?"crit":r.triage?.severity==="P2"?"warn":"info"}">${esc(r.triage?.severity||"P?")}</span>`:`<span class="pill mute">Triage pending</span>`;
+  const lead=inc.snap.ttb!=null?`<span><span class="k">Lead time at detection</span> <b class="num">~${Math.round(inc.snap.ttb)} min</b></span>`:"";
+  const conf=r?.correlation?.confidence;
+  const agents=`<div class="agents">
+    ${agentCard("Triage",r&&`<p>${esc(r.triage?.summary)}</p><ul><li>${esc(r.triage?.customer_impact)}</li></ul>`,sevPill)}
+    ${agentCard("Correlation & RCA",r&&`<p>${esc(r.correlation?.root_cause)}</p><ul>${(r.correlation?.evidence||[]).slice(0,4).map(e=>`<li>${esc(e)}</li>`).join("")}</ul>`,typeof conf==="number"?`<span class="pill info num">${Math.round(conf*100)}% conf.</span>`:"")}
+    ${agentCard("Change intelligence",r&&`<p><b class="mono">${esc(r.change?.suspect_change)}</b> ${esc(r.change?.reasoning)}</p>`)}
+    ${agentCard("Remediation planner",r&&`<p>${inc.actions.length} action(s) proposed${r.benign?", treated as legitimate load":""}. Tiers set by policy below.</p>`,r?.benign?`<span class="pill ok">Benign</span>`:"")}
+    ${agentCard("Safety & compliance",r&&`<p>${esc(r.compliance?.regulatory_assessment)}</p>`,r?(r.compliance?.reportable?`<span class="pill crit">Reportable</span>`:`<span class="pill mute">Not reportable</span>`):"")}
+    ${agentCard("Communications",r&&`<p>${esc(r.communications?.stakeholder_update)}</p>`)}
+  </div>`;
+  const acts=inc.actions.length?`<div class="actions">${inc.actions.map((a,i)=>`<div class="act">
+      <span class="tier ${a.tier}">${a.tier}</span>
+      <div class="what"><b>${esc(a.action_type)}</b> → ${esc(a.target)}<p>${esc(a.rationale)}</p><p class="pol">${esc(a.why)}</p>${a.effect?`<p>${esc(a.effect)}</p>`:""}</div>
+      <div class="st">${a.status==="awaiting"?`<button class="btn primary" data-ap="${i}">Approve</button><button class="btn" data-rj="${i}">Reject</button>`:a.status==="done"?`<span class="pill ok">Executed</span>`:a.status==="rejected"?`<span class="pill mute">Rejected</span>`:a.status==="manual"?`<span class="pill crit">Manual only</span>`:`<span class="pill info">Queued</span>`}</div>
+    </div>`).join("")}</div>`:"";
+  const fb=inc.stage>=4&&!inc.verdict?`<div class="feedback"><p>${inc.stage===4?"The domain is back inside its threshold.":"Incident closed by operator."} Was this a real disruption? Your verdict recalibrates model weights and this domain's threshold.</p><button class="btn primary" id="fbTP">True positive</button><button class="btn" id="fbFP">False positive</button></div>`:"";
+  const ctrls=`<div style="display:flex;gap:8px;flex-wrap:wrap">${inc.stage<2&&inc.mode==="live"&&inc.ctl?`<button class="btn" id="stopInc">Stop investigation</button>`:""}${inc.stage<5?`<button class="btn" id="closeInc">Close incident</button>`:`<button class="btn" id="dismissInc">Dismiss</button>`}</div>`;
+  box.innerHTML=`<div style="display:flex;flex-direction:column;gap:12px">
+    <ol class="stages">${stages}</ol>
+    <div class="inc-meta"><b class="mono">${inc.id}</b><span>${esc(d.name)} · ${esc(d.metric)}</span><span><span class="k">Opened</span> <span class="num">${clock(inc.openedAt)}</span></span>${lead}</div>
+    ${inc.related.length?`<p class="note">Correlated signals since opening: ${inc.related.map(x=>esc(DMAP[x].name)).join(", ")}</p>`:""}
+    <div><h3 style="font-size:12px;color:var(--muted);letter-spacing:.06em;text-transform:uppercase;margin-bottom:6px">ReAct trace</h3><div class="trace"></div></div>
+    ${agents}
+    ${acts}
+    ${inc.error?`<p class="note">${esc(inc.error)}</p>`:""}
+    ${fb}
+    ${ctrls}
+  </div>`;
+  renderTrace();
+}
+$("incident").addEventListener("click",e=>{
+  const inc=S.incident;if(!inc)return;
+  const ap=e.target.closest("[data-ap]"),rj=e.target.closest("[data-rj]");
+  if(ap){execAction(inc,inc.actions[+ap.dataset.ap],"approval");return}
+  if(rj){const a=inc.actions[+rj.dataset.rj];a.status="rejected";log(`${inc.id}: operator rejected ${a.action_type}`);renderIncident();return}
+  if(e.target.id==="stopInc"){inc.ctl?.abort();return}
+  if(e.target.id==="closeInc"){inc.ctl?.abort();inc.stage=5;log(`${inc.id}: closed by operator`);renderIncident();return}
+  if(e.target.id==="dismissInc"){S.incident=null;renderIncident();return}
+  if(e.target.id==="fbTP"||e.target.id==="fbFP")verdict(inc,e.target.id==="fbTP");
+});
+
+function verdict(inc,tp){
+  inc.verdict=tp?"TP":"FP";inc.stage=5;
+  const contrib=inc.snap.scores.map((s,i)=>s>=.4?i:-1).filter(i=>i>=0);
+  const before=[...S.weights], th0=S.theta[inc.domain];
+  contrib.forEach(i=>S.weights[i]*=tp?1.1:.8);
+  const sum=S.weights.reduce((a,b)=>a+b,0);S.weights=S.weights.map(w=>w/sum);
+  if(tp)S.theta[inc.domain]=clamp(th0-.02,.3,.8);else S.theta[inc.domain]=clamp(th0+.05,.3,.8);
+  const changes=DETECTORS.map((m,i)=>{const dlt=S.weights[i]-before[i];return Math.abs(dlt)>.0005?`${m.name} ${before[i].toFixed(3)}→<span class="${dlt>0?"delta-up":"delta-dn"}">${S.weights[i].toFixed(3)}</span>`:null}).filter(Boolean);
+  S.recHist.unshift(`<b>${inc.id}</b> marked ${tp?"true":"false"} positive on ${esc(DMAP[inc.domain].name)}. θ ${th0.toFixed(2)}→${S.theta[inc.domain].toFixed(2)}. ${changes.join(" · ")||"Weights unchanged"}.`);
+  log(`${inc.id}: verdict ${tp?"true":"false"} positive, recalibrated`,"ok");
+  renderRecal();renderIncident();renderEnsemble();
+}
+
+/* ---------- main loop ---------- */
+function tick(){
+  S.t++;
+  for(const f of Object.values(S.faults)){if(f.mitigating&&f.recovery<1)f.recovery=Math.min(1,f.recovery+1/8)}
+  step(S.t);
+  const inc=S.incident;
+  if(!inc||inc.stage>=4){
+    if(inc&&inc.stage>=5&&inc.verdict){/* keep visible until dismissed or next incident */}
+    for(const d of DOMAINS){
+      const r=S.det[d.id];
+      S.over[d.id]=r.ens>=S.theta[d.id]?S.over[d.id]+1:0;
+    }
+    const cand=DOMAINS.filter(d=>S.over[d.id]>=2).sort((a,b)=>S.det[b.id].ens-S.det[a.id].ens)[0];
+    if(cand)openIncident(cand.id);
+  }else{
+    for(const d of DOMAINS){
+      if(d.id!==inc.domain&&S.det[d.id].ens>=S.theta[d.id]&&!inc.related.includes(d.id)){inc.related.push(d.id);log(`${inc.id}: correlated signal on ${d.name}`,"info");renderIncident()}
+    }
+    if(inc.stage===3){
+      const f=inc.faultId&&S.faults[inc.faultId];
+      const calm=S.det[inc.domain].ens<S.theta[inc.domain]*.6&&(!f||f.recovery>=1);
+      S.calm=calm?S.calm+1:0;
+      if(S.calm>=6){
+        inc.stage=4;S.calm=0;
+        if(f){delete S.faults[f.id];renderFaults()}
+        log(`${inc.id}: recovered, ${S.t-inc.openedAt} min after detection`,"ok");renderIncident();
+      }
+    }
+  }
+  renderTiles();renderEnsemble();
+  $("clk").textContent=clock(S.t);$("tplus").textContent="T+"+S.t+"m";
+  if(S.t%5===0)renderFaults();
+}
+let timer=null;
+function schedule(){clearInterval(timer);if(S.running)timer=setInterval(tick,600/S.speed)}
+$("playBtn").onclick=()=>{S.running=!S.running;$("playBtn").textContent=S.running?"Pause":"Resume";$("bar").classList.toggle("paused",!S.running);schedule()};
+$("speed").onchange=e=>{S.speed=+e.target.value;schedule()};
+$("resetBtn").onclick=()=>{S.incident?.ctl?.abort();const keep={sampleFn:S.sampleFn,liveOK:S.liveOK,mode:S.mode};freshState();Object.assign(S,keep);S.speed=+$("speed").value;S.running=true;$("playBtn").textContent="Pause";$("bar").classList.remove("paused");boot();log("Simulation reset");};
+
+function setMode(m){
+  S.mode=m;
+  $("modeLive").setAttribute("aria-pressed",m==="live");$("modeScript").setAttribute("aria-pressed",m==="script");
+  $("modeNote").textContent=m==="live"
+    ?"Claude agents: each incident runs a real ReAct loop on your Claude account, calling this console's tools for metrics, changes, topology and runbooks."
+    :"Scripted agents: pre-written reasoning calling the same tools, so the demo runs with no model. Switch to Claude agents for live reasoning.";
+}
+$("modeLive").onclick=()=>{if(S.liveOK)setMode("live")};
+$("modeScript").onclick=()=>setMode("script");
+
+function boot(){
+  for(const d of DOMAINS)S.det[d.id]=detect5(d);
+  renderFaults();renderPolicy();renderTiles();renderEnsemble();renderRecal();renderIncident();renderLog();
+  $("clk").textContent=clock(S.t);$("tplus").textContent="T+"+S.t+"m";
+  schedule();
+}
+
+freshState();
+setMode("script");
+$("modeLive").disabled=true;$("modeLive").title="Checking whether Claude is available in this view…";
+boot();
+log("Console started. Baseline learned from 220 minutes of history.");
+
+(async()=>{
+  try{
+    const sample=window.claude&&await window.claude.use("sample");
+    if(sample){S.sampleFn=sample;S.liveOK=true;$("modeLive").disabled=false;$("modeLive").title="Agents reason with Claude and call the console's tools";setMode("live");log("Claude agents available","info")}
+    else{$("modeLive").title="Claude agents need the Claude viewer. Using scripted agents.";}
+  }catch{ $("modeLive").title="Claude agents unavailable here. Using scripted agents."}
+})();
+})();
+</script>
+
+</body>
+</html>

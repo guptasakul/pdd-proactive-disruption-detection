@@ -18,6 +18,8 @@ docs/
     source/                   Markdown sources — the editable masters
 tools/
   spec-builder/               Generator: Markdown source → styled .docx
+prototype/
+  pidd-console/               Interactive end-to-end prototype (single HTML file)
 ```
 
 ## Specification set
